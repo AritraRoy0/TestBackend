@@ -4,8 +4,10 @@ import assert from 'node:assert/strict'
 import {
     getDuplicateUserMessage,
     getDuplicateUserQuery,
+    getDuplicateUserQueryExcludingId,
     validateCreateClientPayload,
     validateCreateEmployeePayload,
+    validateUpdateUserPayload,
 } from '../utils/userValidation.js'
 
 const validClient = {
@@ -67,6 +69,43 @@ test('createClient validation does not require password', () => {
     assert.deepEqual(errors, [])
 })
 
+test('updateUser validation accepts partial editable fields and normalizes values', () => {
+    const { payload, errors } = validateUpdateUserPayload({
+        email: ' ALI@EXAMPLE.COM ',
+        phone: '+92 300-1234567',
+        role: 'super_admin',
+        password: 'new-password',
+    })
+
+    assert.deepEqual(errors, [])
+    assert.deepEqual(payload, {
+        phone: '+923001234567',
+        email: 'ali@example.com',
+    })
+})
+
+test('updateUser validation rejects empty required fields and malformed values', () => {
+    const { errors } = validateUpdateUserPayload({
+        username: '',
+        phone: 'abc',
+        email: 'not-an-email',
+    })
+
+    assert.ok(errors.includes('Username cannot be empty'))
+    assert.ok(errors.includes('Phone must contain 7 to 15 digits and may start with +'))
+    assert.ok(errors.includes('Invalid Email Address'))
+})
+
+test('updateUser validation requires at least one editable field', () => {
+    const { payload, errors } = validateUpdateUserPayload({
+        role: 'manager',
+        password: 'new-password',
+    })
+
+    assert.deepEqual(payload, {})
+    assert.ok(errors.includes('At least one valid user field is required to update'))
+})
+
 test('duplicate user query checks username and phone, and only checks email when provided', () => {
     assert.deepEqual(
         getDuplicateUserQuery({ username: 'ali.khan', phone: '03001234567', email: '' }),
@@ -76,6 +115,13 @@ test('duplicate user query checks username and phone, and only checks email when
     assert.deepEqual(
         getDuplicateUserQuery({ username: 'ali.khan', phone: '03001234567', email: 'ali@example.com' }),
         { $or: [{ username: 'ali.khan' }, { phone: '03001234567' }, { email: 'ali@example.com' }] },
+    )
+})
+
+test('duplicate user query can exclude the user being updated', () => {
+    assert.deepEqual(
+        getDuplicateUserQueryExcludingId({ email: 'ali@example.com' }, '64f000000000000000000000'),
+        { $or: [{ email: 'ali@example.com' }], _id: { $ne: '64f000000000000000000000' } },
     )
 })
 

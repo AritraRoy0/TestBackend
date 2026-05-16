@@ -111,7 +111,7 @@ const EditModal = ({ open, setOpen }) => {
                     fullWidth
                     placeholder="Optional"
                     value={employeeData?.email}
-                    onChange={(e) => handleChange('email', e.target.value)}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
                   />
                 </td>
               </tr>

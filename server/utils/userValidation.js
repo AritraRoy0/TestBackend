@@ -3,6 +3,7 @@ import validator from 'validator'
 const phonePattern = /^\+?\d{7,15}$/
 const cnicPattern = /^\d{5}-?\d{7}-?\d$/
 const usernamePattern = /^[a-zA-Z0-9_.-]+$/
+const updateUserFields = ['firstName', 'lastName', 'username', 'phone', 'city', 'CNIC', 'email']
 
 const normalizeInput = (value) => value === undefined || value === null ? '' : String(value).trim()
 
@@ -17,7 +18,25 @@ export const normalizeUserPayload = (body = {}) => ({
     password: normalizeInput(body.password),
 })
 
-const validateUserPayload = (payload, requiredFields, validatePassword = false) => {
+const normalizeUpdateUserPayload = (body = {}) => {
+    const payload = {}
+
+    updateUserFields.forEach((field) => {
+        if (!Object.prototype.hasOwnProperty.call(body, field)) return
+
+        if (field === 'phone') {
+            payload[field] = normalizeInput(body[field]).replace(/[\s-]/g, '')
+        } else if (field === 'email') {
+            payload[field] = normalizeInput(body[field]).toLowerCase()
+        } else {
+            payload[field] = normalizeInput(body[field])
+        }
+    })
+
+    return payload
+}
+
+const validateUserPayload = (payload, requiredFields, validatePassword = false, nonEmptyFields = []) => {
     const fieldLabels = {
         firstName: 'First name',
         lastName: 'Last name',
@@ -29,6 +48,12 @@ const validateUserPayload = (payload, requiredFields, validatePassword = false) 
 
     requiredFields.forEach((field) => {
         if (!payload[field]) errors.push(`${fieldLabels[field] || field} is required`)
+    })
+
+    nonEmptyFields.forEach((field) => {
+        if (Object.prototype.hasOwnProperty.call(payload, field) && !payload[field]) {
+            errors.push(`${fieldLabels[field] || field} cannot be empty`)
+        }
     })
 
     if (payload.firstName && !validator.isLength(payload.firstName, { max: 50 })) {
@@ -73,15 +98,35 @@ export const validateCreateEmployeePayload = (body = {}) => {
     return { payload, errors }
 }
 
-export const getDuplicateUserQuery = (payload) => {
-    const duplicateConditions = [
-        { username: payload.username },
-        { phone: payload.phone },
-    ]
+export const validateUpdateUserPayload = (body = {}) => {
+    const payload = normalizeUpdateUserPayload(body)
+    const errors = validateUserPayload(payload, [], false, ['firstName', 'lastName', 'username', 'phone'])
 
+    if (!Object.keys(payload).length) {
+        errors.unshift('At least one valid user field is required to update')
+    }
+
+    return { payload, errors }
+}
+
+export const getDuplicateUserQuery = (payload) => {
+    const duplicateConditions = []
+
+    if (payload.username) duplicateConditions.push({ username: payload.username })
+    if (payload.phone) duplicateConditions.push({ phone: payload.phone })
     if (payload.email) duplicateConditions.push({ email: payload.email })
 
+    if (!duplicateConditions.length) return null
+
     return { $or: duplicateConditions }
+}
+
+export const getDuplicateUserQueryExcludingId = (payload, userId) => {
+    const duplicateUserQuery = getDuplicateUserQuery(payload)
+
+    if (!duplicateUserQuery) return null
+
+    return { ...duplicateUserQuery, _id: { $ne: userId } }
 }
 
 export const getDuplicateUserMessage = (existingUser, payload) => {

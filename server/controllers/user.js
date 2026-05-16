@@ -5,9 +5,12 @@ import bcrypt from 'bcryptjs'
 import {
     getDuplicateUserMessage,
     getDuplicateUserQuery,
+    getDuplicateUserQueryExcludingId,
     validateCreateClientPayload,
     validateCreateEmployeePayload,
+    validateUpdateUserPayload,
 } from '../utils/userValidation.js'
+import { isValidObjectId } from 'mongoose'
 
 
 export const getUsers = async (req, res, next) => {
@@ -111,8 +114,14 @@ export const getEmployees = async (req, res, next) => {
     }
 }
 
-const findDuplicateUser = (payload) => {
-    return User.findOne(getDuplicateUserQuery(payload))
+const findDuplicateUser = (payload, excludedUserId = null) => {
+    const duplicateUserQuery = excludedUserId
+        ? getDuplicateUserQueryExcludingId(payload, excludedUserId)
+        : getDuplicateUserQuery(payload)
+
+    if (!duplicateUserQuery) return null
+
+    return User.findOne(duplicateUserQuery)
 }
 
 export const createClient = async (req, res, next) => {
@@ -165,6 +174,30 @@ export const updateRole = async (req, res, next) => {
 
         const updatedUser = await User.findByIdAndUpdate(userId, { role }, { new: true })
         res.status(200).json({ reuslt: updatedUser, message: 'Role updated successfully', success: true })
+
+    } catch (err) {
+        next(createError(500, err.message))
+    }
+}
+
+export const updateUser = async (req, res, next) => {
+    try {
+        const { userId } = req.params
+
+        if (!isValidObjectId(userId)) return next(createError(400, 'Invalid user id'))
+
+        const { payload, errors: validationErrors } = validateUpdateUserPayload(req.body)
+        if (validationErrors.length) return next(createError(400, validationErrors.join(', ')))
+
+        const findedUser = await User.findById(userId)
+        if (!findedUser) return next(createError(400, 'User not exist'))
+
+        const duplicateUser = await findDuplicateUser(payload, userId)
+        const duplicateMessage = getDuplicateUserMessage(duplicateUser, payload)
+        if (duplicateMessage) return next(createError(400, duplicateMessage))
+
+        const updatedUser = await User.findByIdAndUpdate(userId, { $set: payload }, { new: true, runValidators: true })
+        res.status(200).json({ result: updatedUser, message: 'User updated successfully', success: true })
 
     } catch (err) {
         next(createError(500, err.message))
