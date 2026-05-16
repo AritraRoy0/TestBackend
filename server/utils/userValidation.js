@@ -131,8 +131,8 @@ export const getDuplicateUserQueryExcludingId = (payload, userId) => {
 
 export const getDuplicateUserMessage = (existingUser, payload) => {
     if (!existingUser) return null
-    if (existingUser.username === payload.username) return 'Username already exist'
-    if (existingUser.phone === payload.phone) return 'Phone already exist'
+    if (payload.username && existingUser.username === payload.username) return 'Username already exist'
+    if (payload.phone && existingUser.phone === payload.phone) return 'Phone already exist'
     if (payload.email && existingUser.email === payload.email) return 'Email already exist'
     return 'User already exist'
 }
