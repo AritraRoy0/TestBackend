@@ -2,6 +2,7 @@ import User from '../models/user.js'
 import Lead from '../models/lead.js'
 import { createError } from '../utils/error.js'
 import bcrypt from 'bcryptjs'
+import validator from 'validator'
 
 
 export const getUsers = async (req, res, next) => {
@@ -105,13 +106,97 @@ export const getEmployees = async (req, res, next) => {
     }
 }
 
+const phonePattern = /^\+?\d{7,15}$/
+const cnicPattern = /^\d{5}-?\d{7}-?\d$/
+const usernamePattern = /^[a-zA-Z0-9_.-]+$/
+
+const normalizeInput = (value) => value === undefined || value === null ? '' : String(value).trim()
+
+const normalizeUserPayload = (body = {}) => ({
+    firstName: normalizeInput(body.firstName),
+    lastName: normalizeInput(body.lastName),
+    username: normalizeInput(body.username),
+    phone: normalizeInput(body.phone).replace(/[\s-]/g, ''),
+    city: normalizeInput(body.city),
+    CNIC: normalizeInput(body.CNIC),
+    email: normalizeInput(body.email).toLowerCase(),
+    password: normalizeInput(body.password),
+})
+
+const validateUserPayload = (payload, requiredFields, validatePassword = false) => {
+    const fieldLabels = {
+        firstName: 'First name',
+        lastName: 'Last name',
+        username: 'Username',
+        phone: 'Phone',
+        password: 'Password',
+    }
+    const errors = []
+
+    requiredFields.forEach((field) => {
+        if (!payload[field]) errors.push(`${fieldLabels[field] || field} is required`)
+    })
+
+    if (payload.firstName && !validator.isLength(payload.firstName, { max: 50 })) {
+        errors.push('First name must be 50 characters or fewer')
+    }
+    if (payload.lastName && !validator.isLength(payload.lastName, { max: 50 })) {
+        errors.push('Last name must be 50 characters or fewer')
+    }
+    if (payload.username && !validator.isLength(payload.username, { min: 3, max: 30 })) {
+        errors.push('Username must be between 3 and 30 characters')
+    }
+    if (payload.username && !usernamePattern.test(payload.username)) {
+        errors.push('Username can only contain letters, numbers, underscores, periods, and hyphens')
+    }
+    if (payload.phone && !phonePattern.test(payload.phone)) {
+        errors.push('Phone must contain 7 to 15 digits and may start with +')
+    }
+    if (payload.email && !validator.isEmail(payload.email)) {
+        errors.push('Invalid Email Address')
+    }
+    if (payload.CNIC && !cnicPattern.test(payload.CNIC)) {
+        errors.push('CNIC must be 13 digits, with optional dashes')
+    }
+    if (validatePassword && payload.password && !validator.isLength(payload.password, { min: 6, max: 128 })) {
+        errors.push('Password must be between 6 and 128 characters')
+    }
+
+    return errors
+}
+
+const getDuplicateUserMessage = (existingUser, payload) => {
+    if (!existingUser) return null
+    if (existingUser.username === payload.username) return 'Username already exist'
+    if (existingUser.phone === payload.phone) return 'Phone already exist'
+    if (payload.email && existingUser.email === payload.email) return 'Email already exist'
+    return 'User already exist'
+}
+
+const findDuplicateUser = (payload) => {
+    const duplicateConditions = [
+        { username: payload.username },
+        { phone: payload.phone },
+    ]
+
+    if (payload.email) duplicateConditions.push({ email: payload.email })
+
+    return User.findOne({ $or: duplicateConditions })
+}
+
 export const createClient = async (req, res, next) => {
     try {
+        const payload = normalizeUserPayload(req.body)
+        const validationErrors = validateUserPayload(payload, ['firstName', 'lastName', 'username', 'phone'])
 
-        const findedUser = await User.findOne({ email: req.body.email })
-        if (Boolean(findedUser)) return next(createError(400, 'Email already exist'))
+        if (validationErrors.length) return next(createError(400, validationErrors.join(', ')))
 
-        const result = await User.create({ ...req.body, role: 'client' })
+        const findedUser = await findDuplicateUser(payload)
+        const duplicateMessage = getDuplicateUserMessage(findedUser, payload)
+        if (duplicateMessage) return next(createError(400, duplicateMessage))
+
+        const { password, ...clientPayload } = payload
+        const result = await User.create({ ...clientPayload, role: 'client' })
         res.status(200).json({ result, message: 'client created seccessfully', success: true })
 
     } catch (err) {
@@ -120,14 +205,19 @@ export const createClient = async (req, res, next) => {
 }
 export const createEmployee = async (req, res, next) => {
     try {
+        const payload = normalizeUserPayload(req.body)
+        const validationErrors = validateUserPayload(payload, ['firstName', 'lastName', 'username', 'phone', 'password'], true)
 
-        const findedUser = await User.findOne({ username: req.body.username })
-        if (Boolean(findedUser)) return next(createError(400, 'Username already exist'))
+        if (validationErrors.length) return next(createError(400, validationErrors.join(', ')))
 
-        const { password } = req.body
-        const hashedPassword = await bcrypt.hash(password, 12)
+        const findedUser = await findDuplicateUser(payload)
+        const duplicateMessage = getDuplicateUserMessage(findedUser, payload)
+        if (duplicateMessage) return next(createError(400, duplicateMessage))
 
-        const result = await User.create({ ...req.body, password: hashedPassword, role: 'employee' })
+        const hashedPassword = await bcrypt.hash(payload.password, 12)
+        const { password, ...employeePayload } = payload
+
+        const result = await User.create({ ...employeePayload, password: hashedPassword, role: 'employee' })
         res.status(200).json({ result, message: 'employee created seccessfully', success: true })
 
     } catch (err) {
